@@ -90,6 +90,61 @@
   }
 
   function buildNameRegex(raw){
+  // ==== Myanmar-wide fallback (by name) ====
+  function buildNameRegexForNationwide(raw){
+    const qv = (raw||'').trim();
+    if (!qv) return null;
+    const aliases = [
+      qv, qv.replace(/th/ig,'t'),
+      'Sitagu','သီတဂူ','Thathudaza','Thudaza','Thawtuzana','သောတုဇန',
+      'Sudhamma','သုဓမ္မ','Sasana','သာသနာ','Vihara','Viharaya','Monastery'
+    ];
+    const uniq = [...new Set(aliases)].map(s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));
+    return `(${uniq.join('|')})`;
+  }
+  async function searchNationwideByName(qtext){
+    const re = buildNameRegexForNationwide(qtext);
+    if (!re) return [];
+    const query = `[out:json][timeout:30];
+      area["ISO3166-1"="MM"]->.mm;
+      (
+        node(area.mm)["amenity"="place_of_worship"]["religion"="buddhist"]["name"~"${re}", i];
+        way (area.mm)["amenity"="place_of_worship"]["religion"="buddhist"]["name"~"${re}", i];
+        relation(area.mm)["amenity"="place_of_worship"]["religion"="buddhist"]["name"~"${re}", i];
+
+        node(area.mm)["amenity"="monastery"]["name"~"${re}", i];
+        way (area.mm)["amenity"="monastery"]["name"~"${re}", i];
+        relation(area.mm)["amenity"="monastery"]["name"~"${re}", i];
+
+        node(area.mm)["building"="monastery"]["name"~"${re}", i];
+        way (area.mm)["building"="monastery"]["name"~"${re}", i];
+        relation(area.mm)["building"="monastery"]["name"~"${re}", i];
+
+        node(area.mm)["amenity"~"school|college|community_centre", i]["name"~"${re}", i];
+        way (area.mm)["amenity"~"school|college|community_centre", i]["name"~"${re}", i];
+        relation(area.mm)["amenity"~"school|college|community_centre", i]["name"~"${re}", i];
+      ); out center tags;`;
+    const data = await fetchOverpassWithBackoff(query);
+    const els = (data.elements||[]).map(e=>{
+      const lat = e.lat || e.center?.lat, lon = e.lon || e.center?.lon, t = e.tags || {};
+      return {
+        id:e.id,
+        name: t['name:my']||t['name']||t['name:en']||'Unknown',
+        name_en: t['name:en']||'',
+        name_mm: t['name:my']||'',
+        addr: t['addr:full']||'',
+        city: t['addr:city']||'',
+        state: t['addr:state']||t['is_in:state']||'',
+        phone: t['contact:phone']||t['phone']||'',
+        website: t['contact:website']||t['website']||'',
+        lat, lon, raw:t
+      };
+    });
+    const seen = new Set(); const unique = [];
+    for (const it of els){ if(!seen.has(it.id)){ seen.add(it.id); unique.push(it); } }
+    return unique.slice(0, 250);
+  }
+
     const qv = (raw||'').trim(); if (!qv) return null;
     const aliases = [qv, qv.replace(/th/ig,'t'),'Sitagu','သီတဂူ','Thathudaza','Thawtuzana','သောတုဇန','Sudhamma','သုဓမ္မ','Sasana','သာသနာ','Vihara','Monastery'];
     const uniq = [...new Set(aliases)].map(s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));
@@ -167,6 +222,37 @@
     try{
       const items = await fetchTemplesForView();
       currentItems = items;
+      if (!currentItems.length){
+        const qEl = document.getElementById('q'); const qv = (qEl && qEl.value || '').trim();
+        if (qv){
+          list.innerHTML = '<div class="card">No monasteries in this area. <button id="mmwide">Search Myanmar by name</button></div>';
+          const btn = document.getElementById('mmwide');
+          if (btn){
+            btn.addEventListener('click', async ()=>{
+              list.innerHTML = '<div class="card">Searching Myanmar nationwide…</div>';
+              const rows = await searchNationwideByName(qv);
+              currentItems = rows; render();
+              const pts = rows.filter(r=>r.lat&&r.lon).map(r=>[r.lat,r.lon]);
+              if (pts.length){ const b = L.latLngBounds(pts); if (b.isValid()) map.fitBounds(b.pad(0.2)); }
+            }, { once:true });
+          }
+          return;
+        } else {
+          list.innerHTML = '<div class="card">No monasteries yet. Try entering a name (e.g., Sitagu / သီတဂူ) or <button id="demoMM">Try a demo</button></div>';
+          const d = document.getElementById('demoMM');
+          if (d){
+            d.addEventListener('click', async ()=>{
+              if (qEl) qEl.value='Sitagu';
+              list.innerHTML = '<div class="card">Searching Myanmar nationwide…</div>';
+              const rows = await searchNationwideByName('Sitagu');
+              currentItems = rows; render();
+              const pts = rows.filter(r=>r.lat&&r.lon).map(r=>[r.lat,r.lon]);
+              if (pts.length){ const b = L.latLngBounds(pts); if (b.isValid()) map.fitBounds(b.pad(0.2)); }
+            }, { once:true });
+          }
+          return;
+        }
+      }
       render();
     }catch(e){
       console.error(e);
