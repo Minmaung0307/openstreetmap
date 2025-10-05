@@ -48,15 +48,20 @@
   const tradSel = document.getElementById('trad'); if (tradSel) tradSel.disabled=false;
 
   // ---------------- Map & Overpass ----------------
-  const MIN_ZOOM = 9;
-  const FETCH_DEBOUNCE_MS = 1200;
+  const MIN_ZOOM = 11;
+  const FETCH_DEBOUNCE_MS = 1600;
 
   let map = L.map('map', { zoomControl:true });
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(map);
   map.setView([21.5,96.0], 9);
   let markerLayer = L.layerGroup().addTo(map);
 
-  const q = document.getElementById('q'),
+  
+  // Movement threshold to avoid hammering Overpass
+  let __lastFetchCenter = map.getCenter();
+  let __lastFetchZoom = map.getZoom();
+  const MIN_MOVE_METERS = 600; // fetch only if moved > 600m
+const q = document.getElementById('q'),
         resetBtn = document.getElementById('reset'),
         list = document.getElementById('list');
 
@@ -71,6 +76,8 @@
   ];
   let __opIndex = 0;
   function opEndpoint(){ return OVERPASS_ENDPOINTS[(__opIndex++) % OVERPASS_ENDPOINTS.length]; }
+  function rotateEndpoint(){ __opIndex++; }
+  let __rateLimitedUntil = 0;
   function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
   function jitter(ms){ return ms + Math.floor(Math.random()*250); }
 
@@ -88,6 +95,11 @@
     try { if (__ctrl) __ctrl.abort('map-updated'); } catch {}
     __ctrl = new AbortController();
     let res;
+    // Respect global cooldown if rate-limited recently
+    if (__rateLimitedUntil && Date.now() < __rateLimitedUntil){
+      const wait = __rateLimitedUntil - Date.now();
+      if (wait > 0) { await sleep(wait); }
+    }
     try{
       res = await fetch(url, { signal: __ctrl.signal });
     }catch(err){
@@ -98,6 +110,8 @@
       throw err;
     }
     if (res.status === 429){
+      __rateLimitedUntil = Date.now() + 8000; // 8s cooldown
+      rotateEndpoint();
       const delay = Math.min(5000*Math.pow(1.6, tries), 15000);
       await sleep(jitter(delay));
       return fetchOverpassWithBackoff(query, tries+1);
@@ -241,6 +255,18 @@
     }
     list.innerHTML = '<div class="card">Searching current map area…</div>';
     markerLayer.clearLayers();
+    // movement threshold
+    try {
+      const c = map.getCenter();
+      const moved = map.distance ? (map.distance(c, __lastFetchCenter) > MIN_MOVE_METERS) : true;
+      const zoomChanged = map.getZoom() !== __lastFetchZoom;
+      if (!moved && !zoomChanged) {
+        // No significant change; use cached/last results
+        if (currentItems && currentItems.length) { render(); return; }
+      }
+      __lastFetchCenter = c;
+      __lastFetchZoom = map.getZoom();
+    } catch(_){}
     try{
       const items = await fetchTemplesForView();
       currentItems = items;
