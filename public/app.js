@@ -1,178 +1,30 @@
-(function(){
-  emailjs.init({ publicKey: 'WT0GOYrL9HnDKvLUf' });
-})();
+(function(start){
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+  else start();
+})(function(){
+const tabs=document.querySelectorAll('.tab');const panels=document.querySelectorAll('.tabpanel');
+tabs.forEach(b=>b.addEventListener('click',()=>{if(b.id==='langToggle'){toggleLang();return}tabs.forEach(x=>x.classList.remove('active'));b.classList.add('active');panels.forEach(p=>p.classList.remove('active'));document.getElementById(b.dataset.tab).classList.add('active')}));
+let lang=localStorage.getItem('mmapp.lang')||'mm';function toggleLang(){lang=(lang==='mm'?'en':'mm');localStorage.setItem('mmapp.lang',lang);applyLang()}
+function applyLang(){const d=lang==='mm'?{searchPh:'ကျောင်းနာမည်၊ မြို့/ပြည်နယ် (မြန်မာ/English)',states:'States/Regions (အားလုံး)',reset:'Reset',eventsPh:'ပွဲခေါင်းစဉ် / ကျောင်း / မြို့'}:{searchPh:'Temple name, city/state (Myanmar/English)',states:'States/Regions (All)',reset:'Reset',eventsPh:'Search events (title, temple, city)'};document.getElementById('q').placeholder=d.searchPh;document.getElementById('region').options[0].textContent=d.states;document.getElementById('reset').textContent=d.reset;document.getElementById('eq').placeholder=d.eventsPh;document.getElementById('ereset').textContent=d.reset}applyLang();
+const mmRegions=['Ayeyarwady','Bago','Chin','Kachin','Kayah','Kayin','Magway','Mandalay','Mon','Naypyidaw','Rakhine','Sagaing','Shan','Tanintharyi','Yangon'];const regionSel = document.getElementById('region');
+if (regionSel) {
+  mmRegions.forEach(r=>{ const o=document.createElement('option'); o.value=r; o.textContent=r; regionSel.appendChild(o); });
+} else {
+  console.warn('Region select (#region) not found at init time');
+}o.value=r;o.textContent=r;regionSel.appendChild(o)});
+let map=L.map('map',{zoomControl:true});L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(map);map.setView([21.5,96.0],6);let markerLayer=L.layerGroup().addTo(map);
+const q=document.getElementById('q'),tradSel=document.getElementById('trad'),resetBtn=document.getElementById('reset'),list=document.getElementById('list');function norm(x){return (x||'').toString().toLowerCase().normalize('NFC').trim()}
+async function fetchTemplesForView(){const b=map.getBounds();const bbox=`${b.getSouth()},${b.getWest()},${b.getNorth()},${b.getEast()}`;const query=`[out:json][timeout:25];(node["amenity"="place_of_worship"]["religion"="buddhist"](${bbox});way["amenity"="place_of_worship"]["religion"="buddhist"](${bbox});relation["amenity"="place_of_worship"]["religion"="buddhist"](${bbox}););out center tags;`;const url='https://overpass-api.de/api/interpreter?data='+encodeURIComponent(query);const res=await fetch(url);if(!res.ok)throw new Error('Overpass failed: '+res.status);const data=await res.json();return (data.elements||[]).map(e=>{const lat=e.lat||e.center?.lat;const lon=e.lon||e.center?.lon;const t=e.tags||{};return{id:e.id,name:t['name:my']||t['name']||t['name:en']||'Unknown',name_en:t['name:en']||'',name_mm:t['name:my']||'',addr:t['addr:full']||'',city:t['addr:city']||'',state:t['addr:state']||t['is_in:state']||'',phone:t['contact:phone']||t['phone']||'',website:t['contact:website']||t['website']||'',lat,lon,raw:t}})}
+let currentItems=[];async function refresh(){list.innerHTML='<div class="card">Searching current map area…</div>';markerLayer.clearLayers();try{const items=await fetchTemplesForView();currentItems=items;render()}catch(e){console.error(e);list.innerHTML='<div class="card">❌ Network error or Overpass rate limit. Zoom/change area and retry.</div>'}}
+function matchesTemples(t){const qq=norm(q.value);const reg=regionSel.value;const trad=tradSel.value;const tradOk=!trad||(trad==='myanmar'&&/monastery|ဗိဟာရ|သာသနာ/i.test(t.name))||(trad==='thai'&&/wat|thai/i.test([t.name,t.name_en].join(' ')))||(trad==='lao'&&/lao|xaya?ram/i.test([t.name,t.name_en].join(' ')))||(trad==='khmer'&&/khmer|pagoda/i.test([t.name,t.name_en].join(' ')))||(trad==='lanka'&&/vihara|viharaya|sri lanka|thera/i.test([t.name,t.name_en].join(' ')));const regOk=!reg||(t.state&&t.state.toLowerCase().includes(reg.toLowerCase()));const textOk=!qq||[t.name,t.name_en,t.name_mm,t.city,t.state,t.addr].some(v=>norm(v).includes(qq));return tradOk&&regOk&&textOk}
+function render(){const rows=currentItems.filter(matchesTemples);list.innerHTML='';if(!rows.length){list.innerHTML='<div class="card">No monasteries in this area/search. Try zooming/moving the map or clear filters.</div>'}const bounds=[];rows.forEach(t=>{const el=document.createElement('div');el.className='card';el.innerHTML=`<h3>${t.name}</h3><div class="meta">${[t.city,t.state].filter(Boolean).join(', ')}</div>${t.addr?`<div class="meta">${t.addr}</div>`:''}<div class="actions">${t.phone?`<a href="tel:${t.phone}">📞 ${t.phone}</a>`:''}${t.website?`<a href="${t.website}" target="_blank" rel="noopener">🌐 Website</a>`:''}</div>`;list.appendChild(el);if(t.lat&&t.lon){const m=L.marker([t.lat,t.lon]).bindPopup(`<strong>${t.name}</strong><br>${[t.city,t.state].filter(Boolean).join(', ')}`);markerLayer.addLayer(m);bounds.push([t.lat,t.lon])}});if(bounds.length){const b=L.latLngBounds(bounds);if(b.isValid())map.fitBounds(b.pad(0.2))}}
+q.addEventListener('input',debounce(render,250));regionSel.addEventListener('change',render);tradSel.addEventListener('change',render);document.getElementById('reset').addEventListener('click',()=>{q.value='';regionSel.value='';tradSel.value='';render()});map.on('moveend',debounce(refresh,350));refresh();function debounce(fn,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms)}}
+const MONTHS=Array.from({length:12},(_,i)=>new Date(2000,i,1).toLocaleString('en-US',{month:'long'}));const emonth=document.getElementById('emonth');const estate=document.getElementById('estate');const eq=document.getElementById('eq');const egrid=document.getElementById('eventGrid');(function(){const o0=document.createElement('option');o0.value='';o0.textContent='All Months';emonth.appendChild(o0);MONTHS.forEach((m,i)=>{const o=document.createElement('option');o.value=String(i+1).padStart(2,'0');o.textContent=m;emonth.appendChild(o)});const s0=document.createElement('option');s0.value='';s0.textContent='All States';estate.appendChild(s0);['Ayeyarwady','Bago','Chin','Kachin','Kayah','Kayin','Magway','Mandalay','Mon','Naypyidaw','Rakhine','Sagaing','Shan','Tanintharyi','Yangon'].forEach(s=>{const o=document.createElement('option');o.value=s;o.textContent=s;estate.appendChild(o)})})();
+let eventsData=[];async function loadEvents(){try{const res=await fetch('events-mm.json',{cache:'no-store'});if(!res.ok)throw new Error('events-mm.json not found');const d=await res.json();eventsData=Array.isArray(d)?d:[]}catch{eventsData=[]}renderEvents()}
+function host(u){try{return new URL(u).host.replace(/^www\./,'')}catch{return'link'}}
+function matchEvent(e){const t=norm(eq.value);const m=emonth.value;const st=estate.value;const txt=!t||[e.title,e.templeName,e.city,e.state].some(v=>norm(v).includes(t));const mon=!m||(String((e.dateStart||'').slice(5,7))===m||String((e.dateEnd||'').slice(5,7))===m);const sOk=!st||(e.state===st);return txt&&mon&&sOk}
+function renderEvents(){egrid.innerHTML='';const rows=eventsData.filter(matchEvent).sort((a,b)=>(a.dateStart||'').localeCompare(b.dateStart||''));if(!rows.length){egrid.innerHTML='<div class="card">No events yet. Edit <code>events-mm.json</code>.</div>';return}rows.forEach(e=>{const date=e.dateEnd&&e.dateEnd!==e.dateStart?`${e.dateStart} → ${e.dateEnd}`:(e.dateStart||'');const img=e.image||'images/event-placeholder.jpg';const h=e.link?host(e.link):null;const card=document.createElement('article');card.className='event-card';card.innerHTML=`<img class="event-thumb" src="${img}" alt="${e.title||'Event'}"><div class="event-body"><div class="event-title">${e.title||''}</div><div class="meta">${date}</div><div>${e.templeName||''}</div><div>${e.city||''}${e.state?', '+e.state:''}</div><div class="meta">${e.address||''}</div><div class="btn-row">${e.link?`<a class="btn-link" href="${e.link}" target="_blank" rel="noopener">🔗 ${h}</a>`:''}</div></div>`;egrid.appendChild(card)})}
+eq.addEventListener('input',renderEvents);emonth.addEventListener('change',renderEvents);estate.addEventListener('change',renderEvents);document.getElementById('ereset').addEventListener('click',()=>{eq.value='';emonth.value='';estate.value='';renderEvents()});loadEvents();
+const form=document.getElementById('f');const status=document.getElementById('status');document.getElementById('downloadJSON').addEventListener('click',()=>{const data=Object.fromEntries(new FormData(form));const blob=new Blob([JSON.stringify({type:'submission',data,ts:Date.now()},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='submission.json';a.click();status.textContent='Saved as submission.json'});
 
-const usStates = [
-  'AL','AK','AZ','AR','CA','CO','CT','DC','DE','FL','GA','HI','IA','ID','IL','IN','KS','KY','LA','MA','MD','ME','MI','MN','MO','MS','MT','NC','ND','NE','NH','NJ','NM','NV','NY','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VA','VT','WA','WI','WV','WY'
-];
-
-const tabs = document.querySelectorAll('.tab');
-const panels = document.querySelectorAll('.tabpanel');
-tabs.forEach(btn => btn.addEventListener('click', () => {
-  tabs.forEach(b=>b.classList.remove('active'));
-  panels.forEach(p=>p.classList.remove('active'));
-  btn.classList.add('active');
-  document.getElementById(btn.dataset.tab).classList.add('active');
-}));
-
-const stateSel = document.getElementById('state');
-usStates.forEach(s=>{ const o=document.createElement('option'); o.value=o.textContent=s; stateSel.appendChild(o);
-  try { const key = bboxKeyFromBounds(b); bboxCache.set(key, { ts: Date.now(), items: __items }); } catch(_) {}
-  return __items; });
-
-const templeList = document.getElementById('templeList');
-const search = document.getElementById('search');
-const traditionSel = document.getElementById('tradition');
-const resetFilters = document.getElementById('resetFilters');
-
-const MIN_ZOOM = 9;
-let map = L.map('map');
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  maxZoom: 19, attribution: '&copy; OpenStreetMap'
-}).addTo(map);
-map.setView([39.5,-98.35], 4);
-let markerLayer = L.layerGroup().addTo(map);
-
-function norm(x){
-  return (x||'').toString().toLowerCase().normalize('NFC').trim();
-}
-
-let googleMapForPlaces, placesService;
-function ensurePlacesService(){
-  if (!placesService){
-    const div = document.createElement('div');
-    div.style.width='0'; div.style.height='0'; div.style.position='absolute'; div.style.left='-9999px';
-    document.body.appendChild(div);
-    googleMapForPlaces = new google.maps.Map(div, {center:{lat:39.5,lng:-98.35}, zoom:4});
-    placesService = new google.maps.places.PlacesService(googleMapForPlaces);
-  }
-  return placesService;
-}
-
-function buildQuery(){
-  const q = search.value.trim();
-  const trad = traditionSel.value;
-  const st = stateSel.value;
-  const parts = [];
-  if (q) parts.push(q);
-  if (trad) parts.push(trad);
-  if (st) parts.push(st);
-  parts.push('Buddhist temple United States');
-  return parts.join(' ');
-}
-
-function textSearchOnce(request){
-  const svc = ensurePlacesService();
-  return new Promise((resolve, reject)=>{
-    svc.textSearch(request, (res, status)=>{
-      if (status === google.maps.places.PlacesServiceStatus.OK && res){
-        resolve(res);
-      } else if (status === google.maps.places.PlacesServiceStatus.ZERO_RESULTS){
-        resolve([]);
-      } else {
-        reject(new Error('Places textSearch failed: ' + status));
-      }
-    });
-  });
-}
-
-function getPlaceDetails(placeId){
-  const svc = ensurePlacesService();
-  return new Promise((resolve)=>{
-    svc.getDetails({placeId, fields:[
-      'name','formatted_address','geometry','international_phone_number','website','url'
-    ]}, (res, status)=>{
-      if (status === google.maps.places.PlacesServiceStatus.OK && res){
-        resolve(res);
-      } else {
-        resolve(null);
-      }
-    });
-  });
-}
-
-async function searchTemples(){
-  const query = buildQuery();
-  templeList.innerHTML = '<div class="card">Searching…</div>';
-  markerLayer.clearLayers();
-
-  try{
-    const results = await textSearchOnce({ query });
-    if (!results.length){
-      templeList.innerHTML = '<div class="card">No results found. Try other keywords (Wat, Vihara, ရွှေ, etc.).</div>';
-      return;
-    }
-    const top = results.slice(0, 20);
-    const details = await Promise.all(top.map(p => getPlaceDetails(p.place_id)));
-
-    templeList.innerHTML='';
-    const boundsPts = [];
-    details.forEach(d=>{
-      const name = d?.name || 'Unknown';
-      const addr = d?.formatted_address || '';
-      const phone = d?.international_phone_number || '';
-      const url = d?.website || d?.url || '';
-      const loc = d?.geometry?.location;
-      const lat = loc ? loc.lat() : null;
-      const lng = loc ? loc.lng() : null;
-
-      const el = document.createElement('div');
-      el.className='card';
-      el.innerHTML = `
-        <h3>${name}</h3>
-        <div class="meta">${addr}</div>
-        <div class="actions">
-          ${phone?`<a href="tel:${phone}">📞 ${phone}</a>`:''}
-          ${url?`<a href="${url}" target="_blank" rel="noopener">🌐 Website</a>`:''}
-        </div>
-      `;
-      templeList.appendChild(el);
-
-      if (lat && lng){
-        const m = L.marker([lat, lng]).bindPopup(`<strong>${name}</strong><br>${addr}`);
-        markerLayer.addLayer(m);
-        boundsPts.push([lat, lng]);
-      }
-    });
-
-    if (boundsPts.length){
-      const b = L.latLngBounds(boundsPts);
-      if (b.isValid()) map.fitBounds(b.pad(0.2));
-    } else {
-      map.setView([39.5,-98.35], 4);
-    }
-  }catch(err){
-    console.error(err);
-    templeList.innerHTML = '<div class="card">❌ Search failed. Check Google Maps API key & billing.</div>';
-  }
-}
-
-search.addEventListener('input', debounce(searchTemples, 400));
-traditionSel.addEventListener('change', searchTemples);
-stateSel.addEventListener('change', searchTemples);
-resetFilters.addEventListener('click', ()=>{
-  search.value=''; traditionSel.value=''; stateSel.value=''; searchTemples();
 });
-
-searchTemples();
-
-const submitForm = document.getElementById('submitForm');
-const submitStatus = document.getElementById('submitStatus');
-submitForm.addEventListener('submit', async (e)=>{
-  e.preventDefault(); submitStatus.textContent='Sending…';
-  try{
-    await emailjs.send('service_z9tkmvr','template_q5q471f', Object.fromEntries(new FormData(submitForm)));
-    submitStatus.textContent='✅ Thanks! We received your submission.';
-    submitForm.reset();
-  }catch(err){
-    console.error(err);
-    submitStatus.textContent='❌ Failed to send. Please try again later.';
-  }
-});
-
-const FETCH_DEBOUNCE_MS = 1400;
-function debounce(fn, ms){
-  let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); };
-}
-
-map.on('moveend', debounce(refresh, (typeof FETCH_DEBOUNCE_MS!=='undefined'?FETCH_DEBOUNCE_MS:1200)));
