@@ -3,29 +3,38 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MM Monastery Exporter</title>
+  <title>MM Monastery Exporter v2</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header>
-  <h1>Myanmar Monastery / Nunnery Finder & Export</h1>
-  <div class="inputs">
+  <h1>Myanmar Monastery/Nunnery Finder & Export</h1>
+  <div class="row">
+    <label class="block">
+      🔎 ကျောင်းနာမည်
+      <input id="nameSearch" placeholder="Sitagu, သီတဂူ, သီလရှင်, Thilashin, Sudhamma...">
+      <button id="nameBtn">Search (Nationwide)</button>
+    </label>
+  </div>
+  <div class="row">
     <label>
-      🔎 လိပ်စာ/မြို့/ဒေသ:
-      <input id="free" placeholder="e.g., Dagon South, Yangon">
-      <button id="geocodeBtn">Find Area</button>
+      📍 State/Region
+      <select id="state">
+        <option value="">(All Myanmar)</option>
+      </select>
+      <button id="stateBtn">Load State</button>
     </label>
     <label>
-      📍 State/Region:
-      <select id="state">
-        <option value="">(Select state/region)</option>
+      🧭 Township
+      <select id="township" disabled>
+        <option value="">(All in State)</option>
       </select>
-      <button id="stateBtn">Load</button>
+      <button id="tsBtn" disabled>Apply Township</button>
     </label>
     <button id="clearBtn">Clear</button>
   </div>
-  <div class="exports">
+  <div class="row">
     <button id="csvBtn">Export CSV</button>
     <button id="geojsonBtn">Export GeoJSON</button>
   </div>
@@ -41,7 +50,7 @@
 </main>
 
 <footer>
-  <small>Data from OpenStreetMap via Overpass API; geocoding by Nominatim. Use responsibly.</small>
+  <small>Data from OpenStreetMap (Overpass, Nominatim). Be mindful of rate limits.</small>
 </footer>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
