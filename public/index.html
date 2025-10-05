@@ -1,146 +1,50 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="my">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>
-      မြန်မာဘုန်းကြီးကျောင်း သွားလမ်းညွှန် (Myanmar Monastery Finder)
-    </title>
-    <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="stylesheet" href="style.css" />
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    />
-    <link rel="icon" href="favicon.ico" sizes="any" />
-    <link rel="icon" type="image/png" href="icons/icon-192.png" />
-  </head>
-  <body>
-    <header class="topbar">
-      <div class="brand">
-        <img src="icons/icon-192.png" alt="" class="logo" />
-        <h1>မြန်မာဘုန်းကြီးကျောင်း သွားလမ်းညွှန်</h1>
-        <span class="muted">Myanmar Monastery Finder</span>
-      </div>
-      <nav class="tabs" role="tablist">
-        <button class="tab active" data-tab="find">🔎 ရှာဖွေ</button>
-        <button class="tab" data-tab="events">📅 ပွဲတော်များ</button>
-        <button class="tab" data-tab="submit">✉️ အချက်အလက် ပို့ရန်</button>
-        <button id="langToggle" class="tab ghost">MM/EN</button>
-      </nav>
-    </header>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MM Monastery Exporter</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Myanmar Monastery / Nunnery Finder & Export</h1>
+  <div class="inputs">
+    <label>
+      🔎 လိပ်စာ/မြို့/ဒေသ:
+      <input id="free" placeholder="e.g., Dagon South, Yangon">
+      <button id="geocodeBtn">Find Area</button>
+    </label>
+    <label>
+      📍 State/Region:
+      <select id="state">
+        <option value="">(Select state/region)</option>
+      </select>
+      <button id="stateBtn">Load</button>
+    </label>
+    <button id="clearBtn">Clear</button>
+  </div>
+  <div class="exports">
+    <button id="csvBtn">Export CSV</button>
+    <button id="geojsonBtn">Export GeoJSON</button>
+  </div>
+</header>
 
-    <main>
-      <section id="find" class="tabpanel active" role="tabpanel">
-        <div class="search-row">
-          <input
-            id="q"
-            type="search"
-            placeholder="ကျောင်းနာမည်၊ မြို့/ပြည်နယ် (မြန်မာ/English)"
-          />
-          <select id="region">
-            <option value="">States/Regions (အားလုံး)</option>
-          </select>
-          <select id="trad">
-            <option value="">Tradition (အားလုံး)</option>
-            <option value="myanmar">Myanmar</option>
-            <option value="thai">Thai</option>
-            <option value="lao">Lao</option>
-            <option value="khmer">Khmer</option>
-            <option value="lanka">Sri Lanka</option>
-          </select>
-          <button id="reset">Reset</button>
-        </div>
-        <div class="split">
-          <div class="list" id="list" aria-live="polite"></div>
-          <div class="mapwrap"><div id="map"></div></div>
-        </div>
-        <p class="hint">
-          📡 မြေပုံမြင်နေသည့်တစ်ဝိုက်ကို Overpass API ကနေ Buddhist temples ကို
-          ရှာပေးမည်။
-        </p>
-      </section>
+<main>
+  <div id="map"></div>
+  <aside id="sidebar">
+    <div id="status">Ready.</div>
+    <div id="count"></div>
+    <div id="list"></div>
+  </aside>
+</main>
 
-      <section id="events" class="tabpanel" role="tabpanel">
-        <div class="search-row">
-          <input
-            id="eq"
-            type="search"
-            placeholder="ပွဲခေါင်းစဉ် / ကျောင်း / မြို့"
-          />
-          <select id="emonth"></select>
-          <select id="estate"></select>
-          <button id="ereset">Reset</button>
-        </div>
-        <div id="eventGrid" class="event-grid"></div>
-        <p class="hint">
-          🖼️ <code>events-mm.json</code> ကို ပြင်သွင်း၍
-          သင့်ပွဲတော်များထည့်နိုင်သည်။
-        </p>
-      </section>
+<footer>
+  <small>Data from OpenStreetMap via Overpass API; geocoding by Nominatim. Use responsibly.</small>
+</footer>
 
-      <section id="submit" class="tabpanel" role="tabpanel">
-        <form id="f" class="card form-card">
-          <div class="form-header">
-            <h2>အချက်အလက် တင်သွင်းရန်</h2>
-            <p class="muted">
-              အင်တာနက်မရလျှင်လည်း Form ဖြည့်ပြီး “Download JSON” ဖြင့်
-              သိမ်းထားနိုင်သည်။
-            </p>
-          </div>
-          <div class="form-grid">
-            <label class="field"
-              ><span>ကျောင်းနာမည်</span><input name="name_mm"
-            /></label>
-            <label class="field"
-              ><span>Temple Name (EN)</span><input name="name_en"
-            /></label>
-            <label class="field"
-              ><span>မြို/မြို့နယ်</span><input name="city"
-            /></label>
-            <label class="field"
-              ><span>ပြည်နယ်/တိုင်း</span><input name="state"
-            /></label>
-            <label class="field full"
-              ><span>လိပ်စာ</span><input name="address"
-            /></label>
-            <label class="field"
-              ><span>ဖုန်း</span><input name="phone"
-            /></label>
-            <label class="field"
-              ><span>Website/Facebook</span><input name="website"
-            /></label>
-            <label class="field full"
-              ><span>မှတ်ချက်</span><textarea name="notes" rows="4"></textarea>
-            </label>
-          </div>
-          <div class="form-actions">
-            <button type="button" id="downloadJSON" class="btn-primary">
-              ⬇️ Download JSON
-            </button>
-            <span class="status" id="status"></span>
-          </div>
-        </form>
-      </section>
-    </main>
-
-    <footer class="footer">
-      <small>Map © OpenStreetMap contributors • Data via Overpass API</small>
-    </footer>
-
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script type="module" src="app.js" defer></script>
-    <script>
-      if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.register("./service-worker.js");
-      }
-    </script>
-    <!-- EmailJS SDK -->
-    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-    <script>
-      (function () {
-        emailjs.init("WT0GOYrL9HnDKvLUf"); // 🔑 replace with your actual Public Key
-      })();
-    </script>
-  </body>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="app.js"></script>
+</body>
 </html>
