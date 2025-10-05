@@ -1,0 +1,24 @@
+[
+  {
+    "title": "ထင်ကြန် (Thingyan) ရေကစားပွဲ",
+    "templeName": "တောင်ဧရာဝတီ သာသနာဓမ္မာရုံ",
+    "city": "ရန်ကုန်",
+    "state": "Yangon",
+    "address": "မင်္ဂလာတောင်ညွန့်",
+    "dateStart": "2025-04-13",
+    "dateEnd": "2025-04-16",
+    "link": "https://example.org/thingyan",
+    "image": "images/event-placeholder.jpg"
+  },
+  {
+    "title": "Vesak Day (ဗိဿက်)",
+    "templeName": "ဓမ္မာရုံ",
+    "city": "မန္တလေး",
+    "state": "Mandalay",
+    "address": "ချမ်းအေးသာဇံ",
+    "dateStart": "2025-05-12",
+    "dateEnd": "2025-05-12",
+    "link": "https://example.org/vesak",
+    "image": "images/event-placeholder.jpg"
+  }
+]
