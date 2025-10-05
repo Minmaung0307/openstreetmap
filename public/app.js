@@ -54,7 +54,12 @@
   map.setView([21.5,96.0], 6);
   let markerLayer = L.layerGroup().addTo(map);
 
-  const q = document.getElementById('q'),
+  
+  // Inflight request control & move suppression
+  let __ctrl = null;
+  let __suppressMove = false;
+  let __lastGoodItems = [];
+const q = document.getElementById('q'),
         tradSel = document.getElementById('trad'),
         resetBtn = document.getElementById('reset'),
         list = document.getElementById('list');
@@ -79,14 +84,27 @@
 
   async function fetchOverpassWithBackoff(query, tries=0){
     const url = opEndpoint() + '?data=' + encodeURIComponent(query);
-    const res = await fetch(url);
+    // abort previous
+    try { if (__ctrl) __ctrl.abort(); } catch {}
+    __ctrl = new AbortController();
+    const res = await fetch(url, { signal: __ctrl.signal });
     if (res.status === 429){
       const delay = Math.min(5000*Math.pow(1.6, tries), 15000);
       await sleep(jitter(delay));
       return fetchOverpassWithBackoff(query, tries+1);
     }
     if (!res.ok) throw new Error('Overpass failed: ' + res.status);
-    return res.json();
+    const ct = (res.headers.get('content-type')||'').toLowerCase();
+    if (!ct.includes('application/json')){
+      const txt = await res.text();
+      // Many Overpass errors are XML/HTML; signal a controlled error
+      throw new Error('Overpass returned non-JSON ('+ct+'): ' + txt.slice(0,80));
+    }
+    try{
+      return await res.json();
+    }catch(e){
+      throw new Error('Overpass JSON parse error: ' + (e && e.message ? e.message : e));
+    }
   }
 
   function buildNameRegex(raw){
@@ -222,6 +240,7 @@
     try{
       const items = await fetchTemplesForView();
       currentItems = items;
+      if (items && items.length) __lastGoodItems = items.slice();
       if (!currentItems.length){
         const qEl = document.getElementById('q'); const qv = (qEl && qEl.value || '').trim();
         if (qv){
@@ -233,7 +252,7 @@
               const rows = await searchNationwideByName(qv);
               currentItems = rows; render();
               const pts = rows.filter(r=>r.lat&&r.lon).map(r=>[r.lat,r.lon]);
-              if (pts.length){ const b = L.latLngBounds(pts); if (b.isValid()) map.fitBounds(b.pad(0.2)); }
+              if (pts.length){ const b = L.latLngBounds(pts); if (b.isValid()){ __suppressMove=true; map.fitBounds(b.pad(0.2)); setTimeout(()=>{__suppressMove=false;},700);} }
             }, { once:true });
           }
           return;
@@ -247,7 +266,7 @@
               const rows = await searchNationwideByName('Sitagu');
               currentItems = rows; render();
               const pts = rows.filter(r=>r.lat&&r.lon).map(r=>[r.lat,r.lon]);
-              if (pts.length){ const b = L.latLngBounds(pts); if (b.isValid()) map.fitBounds(b.pad(0.2)); }
+              if (pts.length){ const b = L.latLngBounds(pts); if (b.isValid()){ __suppressMove=true; map.fitBounds(b.pad(0.2)); setTimeout(()=>{__suppressMove=false;},700);} }
             }, { once:true });
           }
           return;
@@ -256,7 +275,16 @@
       render();
     }catch(e){
       console.error(e);
-      list.innerHTML = '<div class="card">❌ Network/Overpass error. Please wait and try again.</div>';
+      if (__lastGoodItems.length){
+        currentItems = __lastGoodItems.slice();
+        render();
+        const msg = document.createElement('div');
+        msg.className = 'card';
+        msg.textContent = '⚠️ Overpass temporarily unavailable. Showing last results.';
+        list.prepend(msg);
+      } else {
+        list.innerHTML = '<div class="card">❌ Overpass error. Please wait and try again.</div>';
+      }
     }
   }
 
@@ -298,7 +326,7 @@
       }
     });
     if (bounds.length){
-      const b=L.latLngBounds(bounds); if (b.isValid()) map.fitBounds(b.pad(0.2));
+      const b=L.latLngBounds(bounds); if (b.isValid()) { __suppressMove = true; map.fitBounds(b.pad(0.2)); setTimeout(()=>{ __suppressMove=false; }, 700); }
     }
   }
 
@@ -307,7 +335,28 @@
   if (tradSel) tradSel.addEventListener('change', render);
   if (resetBtn) resetBtn.addEventListener('click', ()=>{ if(q) q.value=''; if(regionSel) regionSel.value=''; if(tradSel) tradSel.value=''; render(); });
 
-  map.on('moveend', debounce(refresh, FETCH_DEBOUNCE_MS));
+  if (q){
+    q.addEventListener('keydown', async (ev)=>{
+      if (ev.key === 'Enter'){
+        ev.preventDefault();
+        const qv = (q.value||'').trim();
+        if (!qv) return;
+        list.innerHTML = '<div class="card">Searching Myanmar nationwide…</div>';
+        try{
+          const rows = await searchNationwideByName(qv);
+          currentItems = rows; render();
+          const pts = rows.filter(r=>r.lat&&r.lon).map(r=>[r.lat,r.lon]);
+          if (pts.length){ const b = L.latLngBounds(pts); if (b.isValid()){ __suppressMove=true; map.fitBounds(b.pad(0.2)); setTimeout(()=>{__suppressMove=false;},700);} }
+        }catch(e){
+          console.error(e);
+          list.innerHTML = '<div class="card">❌ Nationwide search failed. Try again shortly.</div>';
+        }
+      }
+    });
+  }
+
+
+  map.on('moveend', debounce(()=>{ if (!__suppressMove) refresh(); }, FETCH_DEBOUNCE_MS));
   refresh();
 
   // ---------------- Events ----------------
