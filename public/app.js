@@ -78,29 +78,23 @@ const q = document.getElementById("q"),
 function norm(x) {
   return (x || "").toString().toLowerCase().normalize("NFC").trim();
 }
-// ---- config ----
+
+// ---- Overpass tune-ups ----
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
   "https://z.overpass-api.de/api/interpreter",
 ];
-const MIN_ZOOM = 9;
-const FETCH_DEBOUNCE_MS = 1200;
-const BBOX_CACHE_TTL_MS = 3 * 60 * 1000; // 3 minutes
-
 let overpassIdx = 0;
-let bboxCache = new Map(); // key -> {ts, items}
-let inflight = false;
+const MIN_ZOOM = 9; // zoom 9+ မှာသာ query
+const FETCH_DEBOUNCE_MS = 1200; // moveend debounce တိုး
+const BBOX_CACHE_TTL_MS = 3 * 60 * 1000;
+let bboxCache = new Map();
 
 function endpoint() {
-  return OVERPASS_ENDPOINTS[overpassIdx % OVERPASS_ENDPOINTS.length];
+  return OVERPASS_ENDPOINTS[overpassIdx++ % OVERPASS_ENDPOINTS.length];
 }
-function rotateEndpoint() {
-  overpassIdx++;
-}
-
 function bboxKey(b) {
-  // coarse rounding to reduce cache keys
   const r = (x) => x.toFixed(2);
   return [
     r(b.getSouth()),
@@ -109,23 +103,53 @@ function bboxKey(b) {
     r(b.getEast()),
   ].join(",");
 }
-
-async function fetchOverpassWithBackoff(query, tries = 0) {
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+async function fetchOverpass(query, tries = 0) {
   const url = endpoint() + "?data=" + encodeURIComponent(query);
   const res = await fetch(url);
   if (res.status === 429) {
-    // rotate & backoff
-    rotateEndpoint();
-    const delay = Math.min(4000 * Math.pow(1.6, tries), 15000);
-    await new Promise((r) => setTimeout(r, delay));
-    return fetchOverpassWithBackoff(query, tries + 1);
+    // rate limit → rotate + backoff
+    await sleep(Math.min(4000 * Math.pow(1.6, tries), 15000));
+    return fetchOverpass(query, tries + 1);
   }
   if (!res.ok) throw new Error("Overpass failed: " + res.status);
   return res.json();
 }
 
+function buildNameRegex(raw) {
+  const q = (raw || "").trim();
+  if (!q) return null;
+  // common aliases (extend as you like)
+  const aliases = [
+    q,
+    q.replace(/th/gi, "t"), // crude mm/en fuzz
+    "Sitagu",
+    "သီတဂူ",
+    "သီတကု",
+    "Sāsana",
+    "Sasana",
+    "သာသနာ",
+    "သုဓမ္မ",
+    "Sudhamma",
+    "Thathudaza",
+    "Thudaza",
+    "Thawtuzana",
+    "Thawtuzan",
+    "သောတုဇန",
+    "သောတုဇန​",
+  ];
+  // dedupe + escape regex
+  const uniq = [...new Set(aliases)].map((s) =>
+    s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  );
+  return `(${uniq.join("|")})`;
+}
+
 async function fetchTemplesForView() {
-  if (map.getZoom() < MIN_ZOOM) return []; // require enough zoom
+  if (map.getZoom() < MIN_ZOOM) return [];
+
   const b = map.getBounds();
   const key = bboxKey(b);
   const now = Date.now();
@@ -133,13 +157,52 @@ async function fetchTemplesForView() {
   if (cached && now - cached.ts < BBOX_CACHE_TTL_MS) return cached.items;
 
   const bbox = `${b.getSouth()},${b.getWest()},${b.getNorth()},${b.getEast()}`;
-  const query = `[out:json][timeout:25];
-    (node["amenity"="place_of_worship"]["religion"="buddhist"](${bbox});
-     way["amenity"="place_of_worship"]["religion"="buddhist"](${bbox});
-     relation["amenity"="place_of_worship"]["religion"="buddhist"](${bbox}););
-    out center tags;`;
+  // user’s search text
+  const nameRE = buildNameRegex(document.getElementById("q").value);
 
-  const data = await fetchOverpassWithBackoff(query);
+  // ❶ Buddhism-focused (place_of_worship/monastery/building=monastery + religion/denomination)
+  // ❷ Name-focused (ANY amenity/building) when name matches Sitagu/သီတဂူ/သောတုဇန…
+  const nameFilter = nameRE ? `["name"~"${nameRE}", i]` : "";
+  const nameBlock = nameRE
+    ? `
+    node${nameFilter}(${bbox});
+    way${nameFilter}(${bbox});
+    relation${nameFilter}(${bbox});`
+    : "";
+
+  const query = `[out:json][timeout:25];
+  (
+    node["amenity"="place_of_worship"]["religion"="buddhist"](${bbox});
+    way ["amenity"="place_of_worship"]["religion"="buddhist"](${bbox});
+    relation["amenity"="place_of_worship"]["religion"="buddhist"](${bbox});
+
+    node["amenity"="monastery"]["religion"="buddhist"](${bbox});
+    way ["amenity"="monastery"]["religion"="buddhist"](${bbox});
+    relation["amenity"="monastery"]["religion"="buddhist"](${bbox});
+
+    node["building"="monastery"]["religion"="buddhist"](${bbox});
+    way ["building"="monastery"]["religion"="buddhist"](${bbox});
+    relation["building"="monastery"]["religion"="buddhist"](${bbox});
+
+    node["denomination"="Theravada"](${bbox});
+    way ["denomination"="Theravada"](${bbox});
+    relation["denomination"="Theravada"](${bbox});
+
+    ${nameBlock}
+
+    // Some schools tagged as school/college but named Sitagu/Thilashin etc.
+    ${
+      nameRE
+        ? `
+    node["amenity"~"school|college|community_centre", i]${nameFilter}(${bbox});
+    way ["amenity"~"school|college|community_centre", i]${nameFilter}(${bbox});
+    relation["amenity"~"school|college|community_centre", i]${nameFilter}(${bbox});`
+        : ""
+    }
+  );
+  out center tags;`;
+
+  const data = await fetchOverpass(query);
   const items = (data.elements || []).map((e) => {
     const lat = e.lat || e.center?.lat;
     const lon = e.lon || e.center?.lon;
@@ -160,16 +223,26 @@ async function fetchTemplesForView() {
     };
   });
 
-  bboxCache.set(key, { ts: now, items });
-  return items;
+  // de-dup by id
+  const seen = new Set();
+  const unique = [];
+  for (const it of items)
+    if (!seen.has(it.id)) {
+      seen.add(it.id);
+      unique.push(it);
+    }
+
+  bboxCache.set(key, { ts: now, items: unique });
+  return unique;
 }
 
-// use heavier debounce on moveend
-map.off("moveend"); // remove old handler if any
-map.on("moveend", debounce(refresh, FETCH_DEBOUNCE_MS));
-
-let currentItems = [];
 async function refresh() {
+  if (map.getZoom() < MIN_ZOOM) {
+    list.innerHTML =
+      '<div class="card">🔍 Zoom in (≥9) to search monasteries / nunneries</div>';
+    markerLayer.clearLayers();
+    return;
+  }
   list.innerHTML = '<div class="card">Searching current map area…</div>';
   markerLayer.clearLayers();
   try {
@@ -179,9 +252,12 @@ async function refresh() {
   } catch (e) {
     console.error(e);
     list.innerHTML =
-      '<div class="card">❌ Network error or Overpass rate limit. Zoom/change area and retry.</div>';
+      '<div class="card">❌ Network/Overpass error. Please wait a moment and try again.</div>';
   }
 }
+map.off("moveend"); // previous handler
+map.on("moveend", debounce(refresh, FETCH_DEBOUNCE_MS));
+
 function matchesTemples(t) {
   const qq = norm(q.value);
   const reg = regionSel.value;
