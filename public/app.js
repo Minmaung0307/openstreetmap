@@ -1,3 +1,5 @@
+// ===== Global variables =====
+let currentItems = []; // ✅ define before render() and refresh()
 const tabs = document.querySelectorAll(".tab");
 const panels = document.querySelectorAll(".tabpanel");
 tabs.forEach((b) =>
@@ -75,6 +77,7 @@ const q = document.getElementById("q"),
   tradSel = document.getElementById("trad"),
   resetBtn = document.getElementById("reset"),
   list = document.getElementById("list");
+if(!list){ list = document.createElement("div"); document.body.appendChild(list); }
 function norm(x) {
   return (x || "").toString().toLowerCase().normalize("NFC").trim();
 }
@@ -326,7 +329,6 @@ document.getElementById("reset").addEventListener("click", () => {
   tradSel.value = "";
   render();
 });
-map.on("moveend", debounce(refresh, 350));
 refresh();
 function debounce(fn, ms) {
   let t;
