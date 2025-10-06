@@ -3,55 +3,48 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MM Monastery Exporter v2</title>
+  <title>MM Monastery Exporter v3</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header>
-  <h1>Myanmar Monastery/Nunnery Finder & Export</h1>
+  <h1>Myanmar Monastery/Nunnery – State → Township → Name</h1>
   <div class="row">
-    <label class="block">
-      🔎 ကျောင်းနာမည်
-      <input id="nameSearch" placeholder="Sitagu, သီတဂူ, သီလရှင်, Thilashin, Sudhamma...">
-      <button id="nameBtn">Search (Nationwide)</button> <button id="demoBtn" title="Run a sample search">Try: Sitagu</button>
-    </label>
-  </div>
-  <div class="row">
-    <label>
-      📍 State/Region
+    <label>📍 State/Region
       <select id="state">
-        <option value="">(All Myanmar)</option>
+        <option value="">(Select state/region)</option>
       </select>
-      <button id="stateBtn">Load State</button>
+      <button id="loadState">Load State</button>
     </label>
-    <label>
-      🧭 Township
+    <label>🧭 Township
       <select id="township" disabled>
-        <option value="">(All in State)</option>
+        <option value="">(All in state)</option>
       </select>
-      <button id="tsBtn" disabled>Apply Township</button>
+      <button id="applyTownship" disabled>Apply Township</button>
     </label>
-    <button id="clearBtn">Clear</button>
+    <label class="grow">🔎 Name
+      <input id="name" placeholder="Sitagu, သီတဂူ, Thilashin, သီလရှင် ...">
+      <button id="applyName">Filter by name</button>
+      <button id="clearAll">Clear</button>
+    </label>
   </div>
   <div class="row">
     <button id="csvBtn">Export CSV</button>
     <button id="geojsonBtn">Export GeoJSON</button>
+    <div id="status">Ready.</div>
   </div>
 </header>
 
 <main>
   <div id="map"></div>
   <aside id="sidebar">
-    <div id="status">Ready.</div>
     <div id="count"></div>
     <div id="list"></div>
   </aside>
 </main>
 
-<footer>
-  <small>Data from OpenStreetMap (Overpass, Nominatim). Be mindful of rate limits.</small>
-</footer>
+<footer><small>Data © OpenStreetMap contributors. Overpass & Nominatim used without API keys—please be gentle.</small></footer>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="app.js"></script>

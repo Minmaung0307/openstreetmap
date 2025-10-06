@@ -7,14 +7,13 @@
   const markers = L.layerGroup().addTo(map);
 
   // UI
-  const nameEl = document.getElementById('nameSearch');
-  const nameBtn = document.getElementById('nameBtn');
-  const demoBtn = document.getElementById('demoBtn');
   const stateEl = document.getElementById('state');
-  const stateBtn = document.getElementById('stateBtn');
+  const loadStateBtn = document.getElementById('loadState');
   const tsEl = document.getElementById('township');
-  const tsBtn = document.getElementById('tsBtn');
-  const clearBtn = document.getElementById('clearBtn');
+  const applyTsBtn = document.getElementById('applyTownship');
+  const nameEl = document.getElementById('name');
+  const applyNameBtn = document.getElementById('applyName');
+  const clearBtn = document.getElementById('clearAll');
   const statusEl = document.getElementById('status');
   const countEl = document.getElementById('count');
   const listEl = document.getElementById('list');
@@ -26,12 +25,16 @@
   STATES.forEach(s=>{ const o=document.createElement('option'); o.value=s; o.textContent=s; stateEl.appendChild(o); });
 
   // Helpers
+  function setStatus(m){ statusEl.textContent = m; }
+  function spin(m){ setStatus('⏳ '+m); }
   function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
   function esc(s){ return String(s||'').replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); }
+  function norm(x){ return (x||'').toString().toLowerCase().normalize('NFC').trim(); }
+  function withinBBox(lat,lon,b){ return lat>=b[0] && lat<=b[2] && lon>=b[1] && lon<=b[3]; }
   function toCSV(rows){
     const head = ['id','name','name_en','name_mm','address','city','state','phone','website','lat','lon'];
     const esc2 = v => '\"'+String(v??'').replace(/\"/g,'\"\"')+'\"';
-    return [head.join(',')].concat(rows.map(r=>head.map(k=>esc2(r[k])).join(','))).join('\\n');
+    return [head.join(',')].concat(rows.map(r=>head.map(k=>esc2(r[k])).join(','))).join('\n');
   }
   function toGeoJSON(rows){
     return { type:'FeatureCollection', features: rows.filter(r=>r.lat&&r.lon).map(r=>({
@@ -68,16 +71,10 @@
       return [parseFloat(r.boundingbox[0]), parseFloat(r.boundingbox[2]), parseFloat(r.boundingbox[1]), parseFloat(r.boundingbox[3])];
     }
     const lat=parseFloat(r.lat), lon=parseFloat(r.lon);
-    return [lat-0.05, lon-0.05, lat+0.05, lon+0.05];
+    return [lat-0.1, lon-0.1, lat+0.1, lon+0.1];
   }
 
-  // Query builders
-  function nameRegex(raw){
-    const q=(raw||'').trim(); if(!q) return null;
-    const aliases=[q, q.replace(/th/ig,'t'),'Sitagu','သီတဂူ','Thilashin','သီလရှင်','Sudhamma','Sasana','Vihara','Viharaya','Monastery','Nunnery'];
-    const uniq=[...new Set(aliases)].map(esc);
-    return '('+uniq.join('|')+')';
-  }
+  // Mapping & storage
   function mapElements(data){
     const out = (data.elements||[]).map(e=>{
       const t=e.tags||{}; const lat=e.lat||e.center?.lat; const lon=e.lon||e.center?.lon;
@@ -99,32 +96,8 @@
     return uniq;
   }
 
-  async function queryNationwideByName(qtext){
-    const re = nameRegex(qtext); if(!re) return [];
-    const query = `[out:json][timeout:30];
-      area["ISO3166-1"="MM"]->.mm;
-      (
-        node(area.mm)["amenity"~"monastery|nunnery|place_of_worship", i]["religion"="buddhist"]["name"~"${re}", i];
-        way (area.mm)["amenity"~"monastery|nunnery|place_of_worship", i]["religion"="buddhist"]["name"~"${re}", i];
-        relation(area.mm)["amenity"~"monastery|nunnery|place_of_worship", i]["religion"="buddhist"]["name"~"${re}", i];
-
-        node(area.mm)["building"~"monastery|nunnery", i]["name"~"${re}", i];
-        way (area.mm)["building"~"monastery|nunnery", i]["name"~"${re}", i];
-        relation(area.mm)["building"~"monastery|nunnery", i]["name"~"${re}", i];
-      );
-      out center tags;`;
-    const data = await overpass(query);
-    return mapElements(data);
-  }
-
-  async function queryBBox(bbox, qtext){
-    const re = nameRegex(qtext);
-    const nameBlock = re ? (
-      'node["name"~"'+re+'", i]('+bbox+');'+
-      'way ["name"~"'+re+'", i]('+bbox+');'+
-      'relation["name"~"'+re+'", i]('+bbox+');'
-    ) : '';
-    const query = `[out:json][timeout:25];
+  async function queryBBoxAll(bbox){
+    const q = `[out:json][timeout:25];
       (
         node["amenity"~"monastery|nunnery|place_of_worship", i]["religion"="buddhist"](${bbox});
         way ["amenity"~"monastery|nunnery|place_of_worship", i]["religion"="buddhist"](${bbox});
@@ -133,29 +106,17 @@
         node["building"~"monastery|nunnery", i](${bbox});
         way ["building"~"monastery|nunnery", i](${bbox});
         relation["building"~"monastery|nunnery", i](${bbox});
-
-        ${nameBlock}
-      );
-      out center tags;`;
-    const data = await overpass(query);
+      ); out center tags;`;
+    const data = await overpass(q);
     return mapElements(data);
   }
 
   async function queryTownshipsInState(stateName){
-    // Try multiple OSM naming variants to get the state/region area
-    const variants = [
-      stateName,
-      stateName + " Region",
-      stateName + " State",
-      stateName + " Division",
-      stateName + " Union Territory"
-    ];
-    for (const v of variants){
+    const variants = [stateName, stateName+' Region', stateName+' State', stateName+' Division', stateName+' Union Territory'];
+    for(const v of variants){
       const q = `[out:json][timeout:25];
         area["ISO3166-1"="MM"]->.mm;
-        // Try to resolve the chosen state to an area
         area.mm["name"="${esc(v)}"]["boundary"="administrative"]["admin_level"~"4|5"]->.st;
-        // Fetch township-level admin boundaries inside this state area
         relation(area.st)["boundary"="administrative"]["admin_level"~"6|7"];
         out bb tags;`;
       try{
@@ -165,38 +126,37 @@
           const bb = e.bounds? [e.bounds.minlat, e.bounds.minlon, e.bounds.maxlat, e.bounds.maxlon] : null;
           return { id:e.id, name: t['name:my']||t['name']||t['name:en']||'Unknown', bbox: bb };
         }).filter(x=>x.bbox);
-        if (rows.length){
-          rows.sort((a,b)=> a.name.localeCompare(b.name));
-          return rows;
-        }
-      }catch(e){
-        // try next variant
-      }
+        if (rows.length){ rows.sort((a,b)=>a.name.localeCompare(b.name)); return rows; }
+      }catch(_){}
     }
-    // Fallback: use Nominatim bbox for the state and query townships within bbox
-    try{
-      const bb = await nominatim(stateName + ", Myanmar");
-      const bbox = `${bb[0]},${bb[1]},${bb[2]},${bb[3]}`;
-      const q2 = `[out:json][timeout:25];
-        (
-          relation["boundary"="administrative"]["admin_level"~"6|7"](${bbox});
-        );
-        out bb tags;`;
-      const data2 = await overpass(q2);
-      const rows2 = (data2.elements||[]).map(e=>{
-        const t=e.tags||{};
-        const bbx = e.bounds? [e.bounds.minlat, e.bounds.minlon, e.bounds.maxlat, e.bounds.maxlon] : null;
-        return { id:e.id, name: t['name:my']||t['name']||t['name:en']||'Unknown', bbox: bbx };
-      }).filter(x=>x.bbox);
-      rows2.sort((a,b)=> a.name.localeCompare(b.name));
-      return rows2;
-    }catch(e){
-      throw new Error("Unable to load townships for "+stateName);
-    }
+    // Fallback by state bbox
+    const bb = await nominatim(stateName+', Myanmar');
+    const bbox = f"{bb[0]},{bb[1]},{bb[2]},{bb[3]}"
+    const q2 = `[out:json][timeout:25];
+      relation["boundary"="administrative"]["admin_level"~"6|7"](${bbox});
+      out bb tags;`;
+    const data2 = await overpass(q2);
+    const rows2 = (data2.elements||[]).map(e=>{
+      const t=e.tags||{};
+      const bbx = e.bounds? [e.bounds.minlat, e.bounds.minlon, e.bounds.maxlat, e.bounds.maxlon] : null;
+      return { id:e.id, name: t['name:my']||t['name']||t['name:en']||'Unknown', bbox: bbx };
+    }).filter(x=>x.bbox);
+    rows2.sort((a,b)=>a.name.localeCompare(b.name));
+    return rows2;
   }
 
-  // Render & Export
-  let current = [];
+  // Fuzzy filter by name (show all similar)
+  function fuzzyFilter(rows, q){
+    const s = norm(q);
+    if (!s) return rows.slice();
+    const aliases = [s, s.replace(/th/g,'t'), 'sitagu','သီတဂူ','thilashin','သီလရှင်','sudhamma','sasana','vihara','viharaya'];
+    return rows.filter(r=>{
+      const hay = norm([r.name,r.name_en,r.name_mm].join(' '));
+      return aliases.some(a => hay.includes(a));
+    });
+  }
+
+  // Render
   function draw(rows){
     markers.clearLayers();
     const pts=[];
@@ -229,69 +189,93 @@
       listEl.appendChild(card);
     });
   }
-  function setStatus(msg){ statusEl.textContent = msg; }
-  function spin(msg){ setStatus('⏳ '+msg); }
+
+  // Data state
+  let stateBBox = null;
+  let stateAll = [];   // all places in state
+  let tsBBox = null;   // selected township bbox
+  let current = [];    // filtered set currently shown
 
   // Wiring
-  nameBtn.addEventListener('click', async ()=>{
-    const q = nameEl.value.trim();
-    if (!q){ setStatus('Enter a name (e.g., Sitagu / သီလရှင်)'); return; }
-    spin('Nationwide search…');
+  loadStateBtn.addEventListener('click', async ()=>{
+    const s = stateEl.value;
+    if (!s){ setStatus('Select a state/region.'); return; }
+    spin('Loading state…');
     try{
-      const rows = await queryNationwideByName(q);
-      current = rows; countEl.textContent = rows.length + ' places';
-      draw(rows); renderList(rows); setStatus('Done.');
-    }catch(e){ setStatus('⚠️ '+(e && e.message ? e.message : String(e))); }
-  });
-  nameEl.addEventListener('keydown', ev=>{ if(ev.key==='Enter') nameBtn.click(); });
-  if (demoBtn){
-    demoBtn.addEventListener('click', ()=>{
-      nameEl.value = 'Sitagu';
-      nameBtn.click();
-    });
-  }
-
-
-  stateBtn.addEventListener('click', async ()=>{
-    const st = stateEl.value;
-    if (!st){ setStatus('Select a state/region.'); return; }
-    spin('Loading townships in '+st+'… (trying name variants)');
-    tsEl.innerHTML = '<option value="">(All in State)</option>';
-    tsEl.disabled = true; tsBtn.disabled = true;
-    try{
-      const ts = await queryTownshipsInState(st);
-      ts.forEach(t=>{
-        const o=document.createElement('option'); o.value=JSON.stringify(t.bbox); o.textContent=t.name; tsEl.appendChild(o);
-      });
-      tsEl.disabled = false; tsBtn.disabled = false;
-      try {
-        const bb = await nominatim(st+', Myanmar');
-        map.fitBounds(boundsFromBBox(bb).pad(0.1));
-      }catch{ /* ignore */ }
-      setStatus('Townships loaded.');
-      const qtxt = (nameEl.value||'').trim();
-      if (qtxt){ try{ const bb2 = await nominatim(st+', Myanmar'); const bboxStr = `${bb2[0]},${bb2[1]},${bb2[2]},${bb2[3]}`; const rows2 = await queryBBox(bboxStr, qtxt); current = rows2; countEl.textContent = rows2.length + ' places'; draw(rows2); renderList(rows2); setStatus('Done.'); }catch(e){ /* ignore */ } }
-    }catch(e){ setStatus('⚠️ '+(e && e.message ? e.message : String(e))); }
+      const bb = await nominatim(s+', Myanmar');
+      stateBBox = bb;
+      map.fitBounds(boundsFromBBox(bb).pad(0.1));
+      // Fetch all monasteries/nunneries in state
+      const bboxStr = `${bb[0]},${bb[1]},${bb[2]},${bb[3]}`;
+      const rows = await queryBBoxAll(bboxStr);
+      stateAll = rows.slice();
+      tsBBox = null;
+      // Load townships
+      setStatus('Loading townships…');
+      const tss = await queryTownshipsInState(s);
+      tsEl.innerHTML = '<option value="">(All in state)</option>';
+      tss.forEach(t=>{ const o=document.createElement('option'); o.value=JSON.stringify(t.bbox); o.textContent=t.name; tsEl.appendChild(o); });
+      tsEl.disabled=false; applyTsBtn.disabled=false;
+      // Show all state results for now
+      current = stateAll.slice();
+      const nameQ = nameEl.value.trim();
+      if (nameQ) current = fuzzyFilter(current, nameQ);
+      countEl.textContent = current.length + ' places';
+      draw(current); renderList(current);
+      setStatus('Done.');
+    }catch(e){ setStatus('⚠️ '+(e.message||String(e))); }
   });
 
-  tsBtn.addEventListener('click', async ()=>{
-    const q = nameEl.value.trim();
-    if (!q){ setStatus('Enter a name first, then choose a township.'); return; }
+  applyTsBtn.addEventListener('click', async ()=>{
+    if (!stateBBox || !stateAll.length){ setStatus('Load a state first.'); return; }
     const val = tsEl.value;
-    if (!val){ setStatus('Choose a township.'); return; }
-    const bbox = JSON.parse(val);
-    const bboxStr = `${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]}`;
-    spin('Searching within township…');
+    spin('Applying township…');
     try{
-      const rows = await queryBBox(bboxStr, q);
-      current = rows; countEl.textContent = rows.length + ' places';
-      map.fitBounds(boundsFromBBox(bbox).pad(0.05));
-      draw(rows); renderList(rows); setStatus('Done.');
-    }catch(e){ setStatus('⚠️ '+(e && e.message ? e.message : String(e))); }
+      if (!val){
+        tsBBox = null;
+        current = stateAll.slice();
+      } else {
+        const bb = JSON.parse(val);
+        tsBBox = bb;
+        // Filter state set by township bbox
+        const filtered = stateAll.filter(r=> r.lat && r.lon && withinBBox(r.lat,r.lon, bb));
+        // If too few (maybe missing centers), do a direct bbox query to be safe
+        if (filtered.length < 3){
+          const bboxStr = `${bb[0]},${bb[1]},${bb[2]},${bb[3]}`;
+          const fresh = await queryBBoxAll(bboxStr);
+          current = fresh;
+        } else {
+          current = filtered;
+        }
+        map.fitBounds(boundsFromBBox(bb).pad(0.05));
+      }
+      const nameQ = nameEl.value.trim();
+      if (nameQ) current = fuzzyFilter(current, nameQ);
+      countEl.textContent = current.length + ' places';
+      draw(current); renderList(current);
+      setStatus('Done.');
+    }catch(e){ setStatus('⚠️ '+(e.message||String(e))); }
   });
+
+  applyNameBtn.addEventListener('click', ()=>{
+    if (!stateAll.length){ setStatus('Load a state first.'); return; }
+    const q = nameEl.value.trim();
+    let base = [];
+    if (tsBBox){
+      base = stateAll.filter(r=> r.lat && r.lon && withinBBox(r.lat,r.lon, tsBBox));
+    } else {
+      base = stateAll.slice();
+    }
+    current = fuzzyFilter(base, q);
+    countEl.textContent = current.length + ' places';
+    draw(current); renderList(current);
+    setStatus('Done.');
+  });
+  nameEl.addEventListener('keydown', ev=>{ if(ev.key==='Enter') applyNameBtn.click(); });
 
   clearBtn.addEventListener('click', ()=>{
-    nameEl.value=''; stateEl.value=''; tsEl.innerHTML='<option value="">(All in State)</option>'; tsEl.disabled=true; tsBtn.disabled=true;
+    stateEl.value=''; tsEl.innerHTML='<option value=\"\">(All in state)</option>'; tsEl.disabled=true; applyTsBtn.disabled=true;
+    nameEl.value=''; stateBBox=null; tsBBox=null; stateAll=[]; current=[];
     markers.clearLayers(); listEl.innerHTML=''; countEl.textContent=''; setStatus('Cleared.');
   });
 
@@ -306,6 +290,4 @@
     download('monasteries.geojson', new Blob([gj], {type:'application/geo+json'}));
   });
 
-  // Demo hint
-  nameEl.placeholder += " • e.g. 'Dagon' or 'Sitagu'";
 })();
