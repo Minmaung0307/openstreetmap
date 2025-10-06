@@ -11,6 +11,7 @@
   const loadStateBtn = document.getElementById('loadState');
   const tsEl = document.getElementById('township');
   const applyTsBtn = document.getElementById('applyTownship');
+  const forceBtn = document.createElement('button'); forceBtn.textContent='Force Refresh'; forceBtn.id='forceRefresh'; document.querySelector('header .row').appendChild(forceBtn);
   const nameEl = document.getElementById('name');
   const applyNameBtn = document.getElementById('applyName');
   const clearBtn = document.getElementById('clearAll');
@@ -59,6 +60,52 @@
     const ct=(res.headers.get('content-type')||'').toLowerCase();
     if (!ct.includes('application/json')){ const t=await res.text(); throw new Error('Overpass non-JSON: '+t.slice(0,80)); }
     return res.json();
+  }
+
+  // Nationwide-by-name query then clip to bbox
+  async function nationwideByName(qtext){
+    const escJs = s => s.replace(/\\/g,'\\\\').replace(/"/g,'\\"');
+    const q = (qtext||'').trim();
+    if (!q) return [];
+    const aliases=[q, q.replace(/th/ig,'t'),'Sitagu','စိတ္တဂူ','သီတဂူ','Thathudaza','Thudaza','Thawtuzana','သောတုဇန','Sudhamma','သုဓမ္မ','Sasana','သာသနာ','Vihara','Viharaya','Monastery','Nunnery','Thilashin','သီလရှင်'];
+    const uniq=[...new Set(aliases)].map(s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));
+    const re = '('+uniq.join('|')+')';
+    const query = `[out:json][timeout:30];
+      area["ISO3166-1"="MM"]->.mm;
+      (
+        node(area.mm)["amenity"~"monastery|nunnery|place_of_worship", i]["religion"="buddhist"]["name"~"${re}", i];
+        way (area.mm)["amenity"~"monastery|nunnery|place_of_worship", i]["religion"="buddhist"]["name"~"${re}", i];
+        relation(area.mm)["amenity"~"monastery|nunnery|place_of_worship", i]["religion"="buddhist"]["name"~"${re}", i];
+
+        node(area.mm)["building"~"monastery|nunnery", i]["name"~"${re}", i];
+        way (area.mm)["building"~"monastery|nunnery", i]["name"~"${re}", i];
+        relation(area.mm)["building"~"monastery|nunnery", i]["name"~"${re}", i];
+      ); out center tags;`;
+    const data = await overpass(query);
+    return mapElements(data);
+  }
+
+  // Load optional local overrides
+  async function loadLocalOverrides(){
+    try{
+      const res = await fetch('local-overrides.json', { cache:'no-store' });
+      if (!res.ok) return [];
+      const arr = await res.json();
+      if (!Array.isArray(arr)) return [];
+      return arr.map((r,i)=>({
+        id: r.id || ('local-'+i),
+        name: r.name || 'Unknown',
+        name_en: r.name_en || '',
+        name_mm: r.name_mm || '',
+        address: r.address || '',
+        city: r.city || '',
+        state: r.state || '',
+        phone: r.phone || '',
+        website: r.website || '',
+        lat: r.lat, lon: r.lon,
+        __local: true
+      })).filter(r=> typeof r.lat==='number' && typeof r.lon==='number');
+    }catch{ return []; }
   }
   async function nominatim(q){
     const url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q='+encodeURIComponent(q);
@@ -163,7 +210,7 @@
     rows.forEach(r=>{
       if(!(r.lat&&r.lon)) return;
       pts.push([r.lat,r.lon]);
-      const html = `<strong>${r.name}</strong><br>
+      const html = `<strong>${r.name}${r.__local?' <em>(local)</em>':''}</strong><br>
         ${[r.city,r.state].filter(Boolean).join(', ')}<br>
         ${r.address? r.address+'<br>':''}
         ${r.phone? '📞 '+r.phone+'<br>':''}
@@ -178,7 +225,7 @@
     if (!rows.length){ listEl.innerHTML='<div class="card">No matches.</div>'; return; }
     rows.forEach(r=>{
       const card=document.createElement('div'); card.className='card';
-      card.innerHTML = `<h3>${r.name}</h3>
+      card.innerHTML = `<h3>${r.name}${r.__local?' <span class="meta">(local)</span>':''}</h3>`
         <div class="meta">${[r.city,r.state].filter(Boolean).join(', ')}</div>
         <div class="meta">${r.address||''}</div>
         <div class="row">
@@ -216,9 +263,21 @@
       tsEl.innerHTML = '<option value="">(All in state)</option>';
       tss.forEach(t=>{ const o=document.createElement('option'); o.value=JSON.stringify(t.bbox); o.textContent=t.name; tsEl.appendChild(o); });
       tsEl.disabled=false; applyTsBtn.disabled=false;
+      // Merge local overrides
+      try{ const local = await loadLocalOverrides(); if (local.length && bb){ const merged = stateAll.concat(local.filter(r=> withinBBox(r.lat,r.lon, bb))); const seen=new Set(); stateAll = merged.filter(x=>{ if(seen.has(x.id)) return false; seen.add(x.id); return true; }); } }catch{}
       // Show all state results for now
       current = stateAll.slice();
+
       const nameQ = nameEl.value.trim();
+      if (nameQ) current = fuzzyFilter(current, nameQ);
+      // If still zero and we have a township bbox, try nationwide by name then clip
+      if ((!current.length) && tsBBox){
+        try{
+          const wide = await nationwideByName(nameQ);
+          current = wide.filter(r=> r.lat && r.lon && withinBBox(r.lat,r.lon, tsBBox));
+        }catch{ /* ignore */ }
+      }
+
       if (nameQ) current = fuzzyFilter(current, nameQ);
       countEl.textContent = current.length + ' places';
       draw(current); renderList(current);
@@ -249,7 +308,17 @@
         }
         map.fitBounds(boundsFromBBox(bb).pad(0.05));
       }
+
       const nameQ = nameEl.value.trim();
+      if (nameQ) current = fuzzyFilter(current, nameQ);
+      // If still zero and we have a township bbox, try nationwide by name then clip
+      if ((!current.length) && tsBBox){
+        try{
+          const wide = await nationwideByName(nameQ);
+          current = wide.filter(r=> r.lat && r.lon && withinBBox(r.lat,r.lon, tsBBox));
+        }catch{ /* ignore */ }
+      }
+
       if (nameQ) current = fuzzyFilter(current, nameQ);
       countEl.textContent = current.length + ' places';
       draw(current); renderList(current);
@@ -288,6 +357,25 @@
     if (!current.length){ setStatus('Nothing to export.'); return; }
     const gj = JSON.stringify(toGeoJSON(current), null, 2);
     download('monasteries.geojson', new Blob([gj], {type:'application/geo+json'}));
+  });
+
+
+  forceBtn.addEventListener('click', async ()=>{
+    if (!stateBBox){ setStatus('Load a state first.'); return; }
+    spin('Force refreshing…');
+    try{
+      let bboxToUse = stateBBox;
+      if (tsBBox) bboxToUse = tsBBox;
+      const bboxStr = `${bboxToUse[0]},${bboxToUse[1]},${bboxToUse[2]},${bboxToUse[3]}`;
+      const rows = await queryBBoxAll(bboxStr);
+      // merge local again
+      try{ const local = await loadLocalOverrides(); if (local.length){ const merged = rows.concat(local.filter(r=> withinBBox(r.lat,r.lon, bboxToUse))); const seen=new Set(); current = merged.filter(x=>{ if(seen.has(x.id)) return false; seen.add(x.id); return true; }); } else { current = rows; } }catch{ current = rows; }
+      const nameQ = nameEl.value.trim();
+      if (nameQ) current = fuzzyFilter(current, nameQ);
+      countEl.textContent = current.length + ' places';
+      draw(current); renderList(current);
+      setStatus('Done.');
+    }catch(e){ setStatus('⚠️ '+(e.message||String(e))); }
   });
 
 })();
