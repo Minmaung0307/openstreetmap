@@ -141,19 +141,57 @@
   }
 
   async function queryTownshipsInState(stateName){
-    const query = `[out:json][timeout:25];
-      area["ISO3166-1"="MM"]->.mm;
-      area.mm["name"="${esc(stateName)}"]["boundary"="administrative"]->.st;
-      relation(area.st)["boundary"="administrative"]["admin_level"~"6|7"];
-      out bb tags;`;
-    const data = await overpass(query);
-    const rows = (data.elements||[]).map(e=>{
-      const t=e.tags||{};
-      const bb = e.bounds? [e.bounds.minlat, e.bounds.minlon, e.bounds.maxlat, e.bounds.maxlon] : null;
-      return { id:e.id, name: t['name:my']||t['name']||t['name:en']||'Unknown', bbox: bb };
-    }).filter(x=>x.bbox);
-    rows.sort((a,b)=> a.name.localeCompare(b.name));
-    return rows;
+    // Try multiple OSM naming variants to get the state/region area
+    const variants = [
+      stateName,
+      stateName + " Region",
+      stateName + " State",
+      stateName + " Division",
+      stateName + " Union Territory"
+    ];
+    for (const v of variants){
+      const q = `[out:json][timeout:25];
+        area["ISO3166-1"="MM"]->.mm;
+        // Try to resolve the chosen state to an area
+        area.mm["name"="${esc(v)}"]["boundary"="administrative"]["admin_level"~"4|5"]->.st;
+        // Fetch township-level admin boundaries inside this state area
+        relation(area.st)["boundary"="administrative"]["admin_level"~"6|7"];
+        out bb tags;`;
+      try{
+        const data = await overpass(q);
+        const rows = (data.elements||[]).map(e=>{
+          const t=e.tags||{};
+          const bb = e.bounds? [e.bounds.minlat, e.bounds.minlon, e.bounds.maxlat, e.bounds.maxlon] : null;
+          return { id:e.id, name: t['name:my']||t['name']||t['name:en']||'Unknown', bbox: bb };
+        }).filter(x=>x.bbox);
+        if (rows.length){
+          rows.sort((a,b)=> a.name.localeCompare(b.name));
+          return rows;
+        }
+      }catch(e){
+        // try next variant
+      }
+    }
+    // Fallback: use Nominatim bbox for the state and query townships within bbox
+    try{
+      const bb = await nominatim(stateName + ", Myanmar");
+      const bbox = `${bb[0]},${bb[1]},${bb[2]},${bb[3]}`;
+      const q2 = `[out:json][timeout:25];
+        (
+          relation["boundary"="administrative"]["admin_level"~"6|7"](${bbox});
+        );
+        out bb tags;`;
+      const data2 = await overpass(q2);
+      const rows2 = (data2.elements||[]).map(e=>{
+        const t=e.tags||{};
+        const bbx = e.bounds? [e.bounds.minlat, e.bounds.minlon, e.bounds.maxlat, e.bounds.maxlon] : null;
+        return { id:e.id, name: t['name:my']||t['name']||t['name:en']||'Unknown', bbox: bbx };
+      }).filter(x=>x.bbox);
+      rows2.sort((a,b)=> a.name.localeCompare(b.name));
+      return rows2;
+    }catch(e){
+      throw new Error("Unable to load townships for "+stateName);
+    }
   }
 
   // Render & Export
@@ -208,7 +246,7 @@
   stateBtn.addEventListener('click', async ()=>{
     const st = stateEl.value;
     if (!st){ setStatus('Select a state/region.'); return; }
-    setStatus('Loading townships in '+st+'…');
+    setStatus('Loading townships in '+st+'… (trying name variants)');
     tsEl.innerHTML = '<option value="">(All in State)</option>';
     tsEl.disabled = true; tsBtn.disabled = true;
     try{
