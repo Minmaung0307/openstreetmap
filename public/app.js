@@ -9,6 +9,7 @@
   // UI
   const nameEl = document.getElementById('nameSearch');
   const nameBtn = document.getElementById('nameBtn');
+  const demoBtn = document.getElementById('demoBtn');
   const stateEl = document.getElementById('state');
   const stateBtn = document.getElementById('stateBtn');
   const tsEl = document.getElementById('township');
@@ -229,24 +230,32 @@
     });
   }
   function setStatus(msg){ statusEl.textContent = msg; }
+  function spin(msg){ setStatus('⏳ '+msg); }
 
   // Wiring
   nameBtn.addEventListener('click', async ()=>{
     const q = nameEl.value.trim();
     if (!q){ setStatus('Enter a name (e.g., Sitagu / သီလရှင်)'); return; }
-    setStatus('Nationwide search…');
+    spin('Nationwide search…');
     try{
       const rows = await queryNationwideByName(q);
       current = rows; countEl.textContent = rows.length + ' places';
       draw(rows); renderList(rows); setStatus('Done.');
-    }catch(e){ setStatus(e.message||String(e)); }
+    }catch(e){ setStatus('⚠️ '+(e && e.message ? e.message : String(e))); }
   });
   nameEl.addEventListener('keydown', ev=>{ if(ev.key==='Enter') nameBtn.click(); });
+  if (demoBtn){
+    demoBtn.addEventListener('click', ()=>{
+      nameEl.value = 'Sitagu';
+      nameBtn.click();
+    });
+  }
+
 
   stateBtn.addEventListener('click', async ()=>{
     const st = stateEl.value;
     if (!st){ setStatus('Select a state/region.'); return; }
-    setStatus('Loading townships in '+st+'… (trying name variants)');
+    spin('Loading townships in '+st+'… (trying name variants)');
     tsEl.innerHTML = '<option value="">(All in State)</option>';
     tsEl.disabled = true; tsBtn.disabled = true;
     try{
@@ -260,7 +269,9 @@
         map.fitBounds(boundsFromBBox(bb).pad(0.1));
       }catch{ /* ignore */ }
       setStatus('Townships loaded.');
-    }catch(e){ setStatus(e.message||String(e)); }
+      const qtxt = (nameEl.value||'').trim();
+      if (qtxt){ try{ const bb2 = await nominatim(st+', Myanmar'); const bboxStr = `${bb2[0]},${bb2[1]},${bb2[2]},${bb2[3]}`; const rows2 = await queryBBox(bboxStr, qtxt); current = rows2; countEl.textContent = rows2.length + ' places'; draw(rows2); renderList(rows2); setStatus('Done.'); }catch(e){ /* ignore */ } }
+    }catch(e){ setStatus('⚠️ '+(e && e.message ? e.message : String(e))); }
   });
 
   tsBtn.addEventListener('click', async ()=>{
@@ -270,13 +281,13 @@
     if (!val){ setStatus('Choose a township.'); return; }
     const bbox = JSON.parse(val);
     const bboxStr = `${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]}`;
-    setStatus('Searching within township…');
+    spin('Searching within township…');
     try{
       const rows = await queryBBox(bboxStr, q);
       current = rows; countEl.textContent = rows.length + ' places';
       map.fitBounds(boundsFromBBox(bbox).pad(0.05));
       draw(rows); renderList(rows); setStatus('Done.');
-    }catch(e){ setStatus(e.message||String(e)); }
+    }catch(e){ setStatus('⚠️ '+(e && e.message ? e.message : String(e))); }
   });
 
   clearBtn.addEventListener('click', ()=>{
