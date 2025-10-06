@@ -131,7 +131,7 @@
     }
     // Fallback by state bbox
     const bb = await nominatim(stateName+', Myanmar');
-    const bbox = f"{bb[0]},{bb[1]},{bb[2]},{bb[3]}"
+    const bbox = `${bb[0]},${bb[1]},${bb[2]},${bb[3]}`
     const q2 = `[out:json][timeout:25];
       relation["boundary"="administrative"]["admin_level"~"6|7"](${bbox});
       out bb tags;`;
